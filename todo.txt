@@ -1,0 +1,76 @@
+按你这个平台的模块依赖关系，推荐用“先打地基，再把一条主业务链路跑通，再扩展”的顺序做，避免一上来就做最难的语音/多端联动。
+
+**建议完成顺序（从 0 到 1）**
+- **0. 基础工程与运行闭环**：Gradle 多模块可构建、`App.java` 可启动、`application.yml/.env`、PostgreSQL/Redis 连接、OpenAPI、统一 `Result<T>` + `GlobalExceptionHandler`、日志规范。
+- **1. 通用基础能力（common/infrastructure）**：`ErrorCode/BusinessException`、`@RateLimit` + `RateLimitAspect` + Lua 脚本、`LlmProviderRegistry`、`StructuredOutputInvoker`、`RedisService`、文件存储（S3/RustFS）和解析（Tika）的基础接口。
+- **2. KnowledgeBase（最适合先落地 AI 能力）**：文档上传 → 解析 → 入库 → 向量化（pgvector）→ RAG 查询/聊天。把 Redis Stream 的“异步任务管道”先跑通一条（向量化）。
+- **3. Resume（复用文件与 AI）**：简历上传/解析/去重 → AI 评分。复用：Tika、S3、StructuredOutput、异步任务（简历分析管道）。
+- **4. Interview（核心业务闭环）**：会话创建 → AI 出题 → 提交答案 → AI 评估 → 报告导出（iText）。这一步把第三条异步管道（面试评估）跑通，并把“平台价值”最核心路径做完。
+- **5. InterviewSchedule（增强体验）**：日历/事件模型 → 邀请邮件/文本解析（AI）→ 生成日程。它依赖 AI 与基础持久化，但不强依赖面试/语音。
+- **6. VoiceInterview（最后做）**：WebSocket 实时通话、ASR/TTS、多轮评估、状态机与容错。这是系统复杂度最高、外部依赖最多的一块，放在最后能最大化复用前面成熟的评估与会话体系。
+
+**每个阶段的“完成标准”**
+- 有最小 API 集合可用（Controller 只做路由 + 校验）。
+- 数据能落库、异常能返回统一结构、限流能生效。
+- 至少一条异步任务（Redis Stream）能生产/消费/重试/失败标记跑通。
+- 前端至少能把该模块的核心流程走一遍（哪怕很简陋）。
+
+如果你告诉我你当前优先级（先做“可用 demo”还是先做“架构完整”），我可以把上面拆成 2-3 周的里程碑清单（每个里程碑对应哪些实体/接口/任务流）。
+
+Week 1：跑起来 + 最小“知识库问答”闭环
+
+目标演示：前端上传 1 个文档，后台解析入库，能发起一次 RAG 问答返回答案。
+后端基础：
+Result<T>、GlobalExceptionHandler、ErrorCode/BusinessException、基础日志规范就位。
+LlmProviderRegistry + StructuredOutputInvoker 能调用一个 Provider（先只支持默认 provider）。
+RedisService 可用；@RateLimit + RateLimitAspect 在 1-2 个接口上生效（GLOBAL/IP 先够用）。
+KnowledgeBase 最小功能：
+文档上传 API（先支持 pdf/docx/txt 任意一种也行）→ 存储（先落本地或 S3/RustFS 二选一，推荐先本地/MinIO 兼容，后面再换）。
+Tika 解析文本 → KnowledgeBaseDocumentEntity 入库。
+pgvector 表结构 + 最简单向量写入（可以先同步向量化，Week2 再上 Stream 异步）。
+/api/knowledgebase/query：输入 query + kbId，返回 answer + 引用片段（先返回 topK 文本片段即可）。
+前端最小页面：
+KB 列表/创建（可选简化成“默认 KB”）。
+上传文档 + 一个输入框提问 + 展示 answer。
+验收口径：curl/Swagger 能完整走通上传→问答；前端能演示 1 次问答。
+
+Week 2：异步任务管道 + 简历解析评分（复用能力）
+
+目标演示：上传简历后自动解析+评分（可异步），结果可查询；KnowledgeBase 向量化改成异步更稳。
+异步（Redis Stream）落地 1-2 条：
+把“知识库向量化”改成 Stream：producer 入队，consumer 处理，失败重试 3 次，超过标 FAILED。
+任务状态模型 AsyncTaskStatus + 查询任务接口（最少 PENDING/RUNNING/SUCCEEDED/FAILED）。
+Resume 模块最小功能：
+上传简历 → 解析文本（Tika）→ 去重（先按文件 hash 或文本 hash）→ 入库。
+AI 评分：先做结构化输出（例如：总分、优点、改进建议、关键技能命中），写入 ResumeScoreEntity/DTO。
+接口：上传、列表、详情、评分结果查询。
+前端最小页面：
+简历上传、列表、详情、评分结果展示（支持轮询任务状态）。
+验收口径：上传简历后 10-30 秒内出评分结果；任务失败会显示 FAILED 而不是卡死。
+
+Week 3：模拟面试最小闭环 + 报告导出（平台核心 Demo）
+
+目标演示：选择简历/岗位→创建面试会话→AI 出题→提交回答→AI 评估→生成报告 PDF。
+Interview 模块最小功能：
+会话创建：InterviewSessionEntity，绑定可选 resumeId、岗位/级别参数。
+出题接口：/api/interview/generate-question（可以先每次返回 1 题）。
+提交回答接口：保存 AnswerEntity；触发评估任务（建议用 Stream 异步，避免 LLM 耗时阻塞）。
+评估结果：得分+点评+改进建议+追问建议（结构化输出）。
+PDF 导出：PdfExportService 生成一份简洁报告（封面+得分+要点列表）。
+前端最小页面：
+创建会话页（岗位/级别/可选选择简历）
+面试页（题目、答题输入、提交、评估结果）
+报告下载按钮
+验收口径：现场演示一轮完整面试（2-3 题也行）并成功下载 PDF。
+
+如果只做 2 周
+
+Week 1 不上 Stream，先同步完成 KB 问答 + Resume 评分闭环。
+Week 2 上 Stream（至少 1 条：面试评估或 KB 向量化）+ Interview 最小闭环（可先不做 PDF，或 PDF 简化）。
+关键取舍（为了 Demo 稳）
+
+先做“单租户/无登录”，把 USER 维度限流、权限、组织多租户都放后面。
+Provider 先只支持一个默认（例如 DashScope/OpenAI 兼容），多 Provider 路由后补。
+VoiceInterview、InterviewSchedule 先不碰，等核心闭环稳定再加。
+你确认一下时间边界是“2 周还是 3 周”，以及 Demo 场景更偏“知识库问答”还是“模拟面试”，我可以把每周再拆成每天的任务清单（到具体 Entity/接口/DTO 名称）。
+[AGENTS_OK]
