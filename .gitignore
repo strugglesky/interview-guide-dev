@@ -42,3 +42,5 @@ bin/
 .DS_Store
 
 .gradle-user-home/
+
+.idea
