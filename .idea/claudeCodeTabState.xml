@@ -7,9 +7,9 @@
           <value>
             <TabSessionState>
               <option name="provider" value="codex" />
-              <option name="sessionId" value="019e15d5-ba6d-70a3-b8af-8822335fdec5" />
-              <option name="cwd" value="$PROJECT_DIR$" />
-              <option name="model" value="gpt-5.4" />
+              <option name="sessionId" value="019e1b06-e228-7e02-9c5f-e17efc87ce15" />
+              <option name="cwd" value="C:\Users\Administrator\IdeaProjects\interview-guide-dev" />
+              <option name="model" value="gpt-5.5" />
               <option name="permissionMode" value="acceptEdits" />
               <option name="reasoningEffort" value="medium" />
             </TabSessionState>
