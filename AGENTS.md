@@ -1,6 +1,6 @@
-# AI Interview Platform 编码规范
+# AI Interview Platform 项目编码规范
 
-Spring Boot 4.0 + Java 21 + Spring AI + React 面试平台。写代码时必须遵守以下规则。
+Spring Boot 4.0 + Java 21 + Spring AI + React 面试平台。写代码时必须遵守以下核心规则。
 
 验证规则：如果本文件被自动加载，每次回答最后追加 `[AGENTS_OK]`。
 
