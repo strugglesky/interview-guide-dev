@@ -1,60 +1,134 @@
--- 单维度限流脚本
--- 基于滑动时间窗口的单维度原子限流
--- 由切面逐条调用实现多维度限流
+-- ============================================================================
+-- 滑动窗口限流脚本（增强版）
+-- 基于 Redis ZSET 实现原子性滑动窗口限流
+-- 特性：
+--   1. 动态过期时间，减少内存占用
+--   2. 唯一请求ID生成（时间戳 + 微秒 + 自增序列）
+--   3. 参数校验，避免配置错误导致流量问题
+--   4. 支持高并发场景
+-- ============================================================================
 
--- 参数说明：
--- KEYS[1]: 限流维度键
--- ARGV[1]: 当前时间戳（毫秒）
--- ARGV[2]: 申请令牌数
--- ARGV[3]: 时间窗口（毫秒）
--- ARGV[4]: 最大令牌数（窗口内允许的总数）
--- ARGV[5]: 请求唯一标识
+-- KEYS[1]: 限流维度键（如：rate_limit:ip:192.168.1.1:getUser）
+-- ARGV[1]: 限流阈值（窗口内允许的最大请求数）
+-- ARGV[2]: 时间窗口大小（毫秒）
 
-local key = KEYS[1]
-local now_ms = tonumber(ARGV[1])
-local permits = tonumber(ARGV[2])
-local interval = tonumber(ARGV[3])
-local max_tokens = tonumber(ARGV[4])
-local request_id = ARGV[5]
+-- 返回值：
+--   1 - 允许通过
+--   0 - 被限流
 
-local value_key = key .. ":value"
-local permits_key = key .. ":permits"
+-- ============================================================================
+-- 1. 参数获取与校验
+-- ============================================================================
 
--- 获取当前可用令牌（不存在则使用 max_tokens）
-local current_val = tonumber(redis.call("get", value_key)) or max_tokens
+local key = KEYS[1]                    -- 限流Key
+local limit = tonumber(ARGV[1])        -- 最大请求数
+local window_millis = tonumber(ARGV[2]) -- 窗口大小（毫秒）
 
--- 回收过期令牌
-local expired_values = redis.call("zrangebyscore", permits_key, 0, now_ms - interval)
-if #expired_values > 0 then
-    local expired_count = 0
-    for _, v in ipairs(expired_values) do
-        local p = tonumber(string.match(v, ":(%d+)$"))
-        if p then
-            expired_count = expired_count + p
-        end
-    end
-
-    redis.call("zremrangebyscore", permits_key, 0, now_ms - interval)
-
-    if expired_count > 0 then
-        current_val = math.min(max_tokens, current_val + expired_count)
-    end
-end
-
--- 检查可用令牌
-if current_val < permits then
+-- 【防御性校验】Key缺失或为空时直接拒绝，避免错误配置导致无限流保护
+if not key or key == '' then
     return 0
 end
 
--- 扣减令牌
-local permit_record = request_id .. ":" .. permits
-redis.call("zadd", permits_key, now_ms, permit_record)
-redis.call("set", value_key, current_val - permits)
+-- 【防御性校验】限流次数非法时拒绝，防止阈值配置错误导致流量被无限放大
+if not limit or limit <= 0 then
+    return 0
+end
 
--- 设置过期时间（窗口的2倍，至少1秒）
-local expire_time = math.ceil(interval * 2 / 1000)
-if expire_time < 1 then expire_time = 1 end
-redis.call("expire", value_key, expire_time)
-redis.call("expire", permits_key, expire_time)
+-- 【防御性校验】窗口非法时默认放行，避免因配置异常把所有请求都误杀
+if not window_millis or window_millis <= 0 then
+    return 1
+end
+
+-- ============================================================================
+-- 2. 获取当前时间（毫秒级精度）
+--    Redis TIME 命令返回：秒数 微秒数
+--    例：[1702656000, 123456] 表示 2023-12-15 20:00:00.123456
+-- ============================================================================
+
+local time = redis.call('TIME')
+local now_millis = time[1] * 1000 + math.floor(time[2] / 1000)  -- 当前毫秒时间戳
+local window_start = now_millis - window_millis                  -- 窗口起始时间
+
+-- ============================================================================
+-- 3. 清理过期请求
+--    删除所有 score <= window_start 的成员，只保留当前窗口内的请求记录
+-- ============================================================================
+
+redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+
+-- ============================================================================
+-- 4. 检查是否超过限流阈值
+--    ZCARD 返回 ZSET 中的元素个数，即当前窗口内的总请求数
+-- ============================================================================
+
+local current = redis.call('ZCARD', key)
+if current >= limit then
+    -- ========================================================================
+    -- 【限流命中】动态设置过期时间
+    --    根据窗口内最早的一条请求计算剩余存活时间
+    --    避免 key 长期占用内存（trick: 比固定 PEXPIRE 更精确）
+    -- ========================================================================
+    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')  -- 获取最早请求及其score
+    if oldest[2] then
+        -- 计算从最早请求的时间到窗口结束还需要多久
+        local ttl = tonumber(oldest[2]) + window_millis - now_millis
+        if ttl > 0 then
+            redis.call('PEXPIRE', key, ttl)   -- 按实际剩余时间设置过期
+        else
+            redis.call('PEXPIRE', key, window_millis)  -- 兜底：按完整窗口时间过期
+        end
+    else
+        redis.call('PEXPIRE', key, window_millis)
+    end
+    return 0  -- 拒绝请求
+end
+
+-- ============================================================================
+-- 5. 生成唯一请求ID
+--    格式：毫秒时间戳-微秒数-自增序列
+--    例：1702656000-123456-1
+--    
+--    为什么需要自增序列？
+--      极端并发下，两个请求可能在同一毫秒+同一微秒到达
+--      加上自增序列确保 member 绝对唯一，避免 ZADD 覆盖
+-- ============================================================================
+
+local sequence = redis.call('INCR', key .. ':seq')  -- 自增序列，独立Key
+local request_id = tostring(now_millis) .. '-' .. tostring(time[2]) .. '-' .. tostring(sequence)
+
+-- ============================================================================
+-- 6. 记录当前请求
+--    ZADD：将当前请求加入 ZSET，score=当前时间戳，member=唯一标识
+-- ============================================================================
+
+redis.call('ZADD', key, now_millis, request_id)
+
+-- ============================================================================
+-- 7. 写入后重新计算过期时间
+--     让 key 的生命周期与窗口对齐，而不是固定过期
+-- ============================================================================
+
+local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+if oldest[2] then
+    local ttl = tonumber(oldest[2]) + window_millis - now_millis
+    if ttl > 0 then
+        redis.call('PEXPIRE', key, ttl)
+    else
+        redis.call('PEXPIRE', key, window_millis)
+    end
+else
+    redis.call('PEXPIRE', key, window_millis)
+end
+
+-- ============================================================================
+-- 8. 序列Key过期清理
+--     自增序列的Key只需要在窗口期间存在，与主Key保持同步过期即可
+-- ============================================================================
+
+redis.call('PEXPIRE', key .. ':seq', window_millis)
+
+-- ============================================================================
+-- 9. 返回成功（允许通过）
+-- ============================================================================
 
 return 1
