@@ -1,8 +1,10 @@
 package org.example.common.annotation;
 
+import lombok.AllArgsConstructor;
 import org.example.common.aspect.RateLimitAspect;
 
 import java.lang.annotation.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 限流注解
@@ -41,6 +43,79 @@ public @interface RateLimit {
          */
         USER
     }
+
+    /**
+     * 限流维度。
+     */
+    Dimension dimension() default Dimension.GLOBAL;
+
+    /**
+     * 时间窗口内允许的最大请求次数。
+     */
+    int count() default 10;
+
+    /**
+     * 限流时间窗口大小。
+     */
+    long interval() default 1;
+
+    /**
+     * 时间窗口单位，默认按秒计算。
+     */
+    TimeUnit timeUnit() default TimeUnit.SECONDS;
+    /**
+     * 时间窗口单位枚举
+     */
+    enum TimeUnit {
+        MILLISECONDS,
+        SECONDS,
+        MINUTES,
+        HOURS,
+        DAYS;
+        /**
+         * 将时间窗口单位转换为毫秒数
+         *
+         * @param interval 时间窗口大小
+         * @return 毫秒数
+         */
+        public long toMillis(long interval) {
+            switch (this) {
+                case MILLISECONDS:
+                    return interval;
+                case SECONDS:
+                    return interval * 1000;
+                case MINUTES:
+                    return interval * 1000 * 60;
+                case HOURS:
+                    return interval * 1000 * 60 * 60;
+                case DAYS:
+                    return interval * 1000 * 60 * 60 * 24;
+                default:
+                    throw new IllegalArgumentException("Invalid time unit: " + this);
+            }
+        }
+    }
+    /**
+     * 等待令牌的超时时间
+     * 如果设置为0，表示不等待，直接获取令牌，失败则拒绝
+     * 如果大于0，会尝试等待指定时间获取令牌
+     *
+     * @return 超时时间
+     */
+    long timeout() default 0;
+
+    /**
+     * 降级方法名
+     * 当限流触发时，调用指定方法进行降级处理
+     * 降级方法支持：
+     * 1. 无参方法
+     * 2. 与原方法参数列表完全一致的方法
+     * 降级方法必须在同一个类中，返回值类型与原方法兼容
+     * 如果为空字符串，则抛出 RateLimitExceededException 异常
+     *
+     * @return 降级方法名
+     */
+    String fallback() default "";
 
 
     //容器注解
