@@ -98,8 +98,7 @@ class FileStorageServiceTest {
         @DisplayName("应删除文件")
         void shouldDeleteFile() {
             when(storageConfig.getBucket()).thenReturn("bucket");
-            doNothing().when(s3Client).deleteObject(any(DeleteObjectRequest.class));
-
+            when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(null);
             boolean deleted = fileStorageService.delete("resume/test.pdf");
 
             assertThat(deleted).isTrue();
