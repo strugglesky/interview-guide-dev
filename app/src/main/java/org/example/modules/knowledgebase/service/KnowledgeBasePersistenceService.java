@@ -9,6 +9,7 @@ import org.example.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -22,14 +23,44 @@ public class KnowledgeBasePersistenceService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
     /**
-     * 保存知识库实体。
+     * 根据文件元数据创建并保存知识库实体。
      *
-     * @param knowledgeBase 知识库实体
+     * @param file       上传文件
+     * @param name       知识库名称
+     * @param category   知识库分类
+     * @param storageKey 文件存储 Key
+     * @param storageUrl 文件访问地址
+     * @param fileHash   文件哈希
      * @return 保存后的知识库实体
      */
     @Transactional
-    public KnowledgeBaseEntity save(KnowledgeBaseEntity knowledgeBase) {
-        validateKnowledgeBase(knowledgeBase);
+    public KnowledgeBaseEntity save(MultipartFile file, String name, String category, String storageKey, String storageUrl, String fileHash) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件不能为空");
+        }
+        if (!StringUtils.hasText(name)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库名称不能为空");
+        }
+        if (!StringUtils.hasText(storageKey)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库文件存储路径不能为空");
+        }
+        if (!StringUtils.hasText(storageUrl)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库文件访问地址不能为空");
+        }
+        validateFileHash(fileHash);
+
+        KnowledgeBaseEntity knowledgeBase = new KnowledgeBaseEntity();
+        knowledgeBase.setName(name.strip());
+        knowledgeBase.setCategory(StringUtils.hasText(category) ? category.strip() : null);
+        knowledgeBase.setOriginalFilename(file.getOriginalFilename());
+        knowledgeBase.setFileSize(file.getSize());
+        knowledgeBase.setContentType(file.getContentType());
+        knowledgeBase.setStorageKey(storageKey);
+        knowledgeBase.setStorageUrl(storageUrl);
+        knowledgeBase.setFileHash(fileHash);
+        knowledgeBase.setVectorStatus(VectorStatus.PENDING);
+        knowledgeBase.setVectorError(null);
+        knowledgeBase.setChunkCount(0);
         return knowledgeBaseRepository.save(knowledgeBase);
     }
 
@@ -42,11 +73,7 @@ public class KnowledgeBasePersistenceService {
     @Transactional(readOnly = true)
     public KnowledgeBaseEntity getById(Long id) {
         validateId(id);
-        return knowledgeBaseRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND,
-                        "知识库不存在"
-                ));
+        return knowledgeBaseRepository.findById(id).orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
     }
 
     /**
@@ -58,11 +85,7 @@ public class KnowledgeBasePersistenceService {
     @Transactional(readOnly = true)
     public KnowledgeBaseEntity getByFileHash(String fileHash) {
         validateFileHash(fileHash);
-        return knowledgeBaseRepository.findByFileHash(fileHash)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND,
-                        "知识库不存在"
-                ));
+        return knowledgeBaseRepository.findByFileHash(fileHash).orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
     }
 
     /**
@@ -104,6 +127,19 @@ public class KnowledgeBasePersistenceService {
     }
 
     /**
+     * 处理重复知识库文件。
+     *
+     * @param fileHash 文件哈希
+     * @return 已存在的知识库实体
+     */
+    @Transactional
+    public KnowledgeBaseEntity handleDuplicateKnowledgeBase(String fileHash) {
+        KnowledgeBaseEntity knowledgeBase = getByFileHash(fileHash);
+        knowledgeBase.incrementAccessCount();
+        return knowledgeBaseRepository.save(knowledgeBase);
+    }
+
+    /**
      * 批量增加知识库提问次数。
      *
      * @param ids 知识库 ID 列表
@@ -118,9 +154,9 @@ public class KnowledgeBasePersistenceService {
     /**
      * 更新知识库向量化状态。
      *
-     * @param id 知识库 ID
+     * @param id           知识库 ID
      * @param vectorStatus 向量化状态
-     * @param vectorError 向量化错误信息
+     * @param vectorError  向量化错误信息
      * @return 更新后的知识库实体
      */
     @Transactional
@@ -134,7 +170,7 @@ public class KnowledgeBasePersistenceService {
     /**
      * 更新知识库分块数量。
      *
-     * @param id 知识库 ID
+     * @param id         知识库 ID
      * @param chunkCount 分块数量
      * @return 更新后的知识库实体
      */
