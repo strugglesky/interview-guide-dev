@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.infrastructure.file.FileHashService;
 import org.example.infrastructure.file.FileStorageService;
 import org.example.infrastructure.file.FileValidationService;
+import org.example.modules.knowledgebase.listener.VectorizeStreamProducer;
 import org.example.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import org.springframework.stereotype.Service;
 
