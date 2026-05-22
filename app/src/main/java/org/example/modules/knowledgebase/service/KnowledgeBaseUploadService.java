@@ -9,6 +9,7 @@ import org.example.infrastructure.file.FileStorageService;
 import org.example.infrastructure.file.FileValidationService;
 import org.example.modules.knowledgebase.listener.VectorizeStreamProducer;
 import org.example.modules.knowledgebase.model.KnowledgeBaseEntity;
+import org.example.modules.knowledgebase.model.VectorStatus;
 import org.example.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import org.redisson.api.stream.StreamMessageId;
 import org.springframework.stereotype.Service;
@@ -33,15 +34,16 @@ public class KnowledgeBaseUploadService {
     private final FileValidationService fileValidationService;
     private final FileHashService fileHashService;
     private final VectorizeStreamProducer vectorizeStreamProducer;
+
     /**
      * 上传知识库文件
      *
-     * @param file 知识库文件
-     * @param name 知识库名称（可选，如果为空则从文件名提取）
+     * @param file     知识库文件
+     * @param name     知识库名称（可选，如果为空则从文件名提取）
      * @param category 分类（可选）
      * @return 上传结果和存储信息（包含duplicate字段，表示是否为重复上传）
      */
-    public Map<String,Object> upload(MultipartFile file, String name, String category) {
+    public Map<String, Object> upload(MultipartFile file, String name, String category) {
         // 1. 先做基础文件校验，避免无效文件进入后续流程。
         fileValidationService.validateKnowledgeBaseFile(file);
 
@@ -52,21 +54,10 @@ public class KnowledgeBaseUploadService {
         // 3. 计算文件哈希用于去重判断。
         String fileHash = fileHashService.calculateHash(file);
         if (knowledgeBaseRepository.existsByFileHash(fileHash)) {
-            KnowledgeBaseEntity duplicateKnowledgeBase =
-                    persistenceService.handleDuplicateKnowledgeBase(fileHash);
-            return Map.of(
-                    "duplicate", true,
-                    "knowledgeBaseId", duplicateKnowledgeBase.getId(),
-                    "name", duplicateKnowledgeBase.getName(),
-                    "category", duplicateKnowledgeBase.getCategory(),
-                    "storageKey", duplicateKnowledgeBase.getStorageKey(),
-                    "storageUrl", duplicateKnowledgeBase.getStorageUrl(),
-                    "vectorStatus", duplicateKnowledgeBase.getVectorStatus(),
-                    "fileHash", duplicateKnowledgeBase.getFileHash()
-            );
+            persistenceService.handleDuplicateKnowledgeBase(fileHash);
         }
 
-        // 4. 生成存储信息并上传原始文件。
+        // 4. 生成存储信息并上传原始文件至RustFS。
         String finalName = StringUtils.hasText(name) ? name.strip() : file.getOriginalFilename();
         String storageKey = storageService.generateObjectKey("knowledgebase", file.getOriginalFilename());
         String storageUrl = storageService.upload(file, storageKey);
@@ -87,25 +78,31 @@ public class KnowledgeBaseUploadService {
                 knowledgeBase.getId(),
                 content
         );
+        log.info("知识库上传完成，向量化任务已入队: {}, kbId={}", file.getOriginalFilename(), knowledgeBase.getId());
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("duplicate", false);
-        result.put("knowledgeBaseId", knowledgeBase.getId());
-        result.put("name", knowledgeBase.getName());
-        result.put("category", knowledgeBase.getCategory());
-        result.put("storageKey", knowledgeBase.getStorageKey());
-        result.put("storageUrl", knowledgeBase.getStorageUrl());
-        result.put("vectorStatus", knowledgeBase.getVectorStatus());
-        result.put("fileHash", knowledgeBase.getFileHash());
-        result.put("messageId", messageId == null ? null : messageId.toString());
-        return result;
+        // 7. 返回结果（状态为 PENDING，前端可轮询获取最新状态）
+        return Map.of(
+                "knowledgeBase", Map.of(
+                        "id", knowledgeBase.getId(),
+                        "name", knowledgeBase.getName(),
+                        "category", knowledgeBase.getCategory() != null ? knowledgeBase.getCategory() : "",
+                        "fileSize", knowledgeBase.getFileSize(),
+                        "contentLength", content.length(),
+                        "vectorStatus", VectorStatus.PENDING.name()
+                ),
+                "storage", Map.of(
+                        "fileKey", storageKey,
+                        "fileUrl", storageUrl
+                ),
+                "duplicate", false
+        );
     }
+
     /**
      * 验证文件类型
      *
      * @param contentType 检测出的内容类型
-     * @param fileName 文件名
-     * @return 无返回值
+     * @param fileName    文件名
      */
     private void validateContentType(String contentType, String fileName) {
         if (!StringUtils.hasText(contentType)) {

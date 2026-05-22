@@ -1,6 +1,7 @@
 package org.example.modules.knowledgebase.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.common.exception.BusinessException;
 import org.example.common.model.ErrorCode;
 import org.example.modules.knowledgebase.model.KnowledgeBaseEntity;
@@ -12,6 +13,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 知识库持久化服务
@@ -19,6 +21,7 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class KnowledgeBasePersistenceService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
@@ -133,10 +136,24 @@ public class KnowledgeBasePersistenceService {
      * @return 已存在的知识库实体
      */
     @Transactional
-    public KnowledgeBaseEntity handleDuplicateKnowledgeBase(String fileHash) {
+    public Map<String, Object> handleDuplicateKnowledgeBase(String fileHash) {
         KnowledgeBaseEntity knowledgeBase = getByFileHash(fileHash);
+        log.info("检测到重复知识库，返回已有记录: kbId={}", knowledgeBase.getId());
         knowledgeBase.incrementAccessCount();
-        return knowledgeBaseRepository.save(knowledgeBase);
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.save(knowledgeBase);
+        return Map.of(
+                "knowledgeBase", Map.of(
+                        "id", kb.getId(),
+                        "name", kb.getName(),
+                        "fileSize", kb.getFileSize(),
+                        "contentLength", 0  // 不再存储content，所以长度为0
+                ),
+                "storage", Map.of(
+                        "fileKey", kb.getStorageKey() != null ? kb.getStorageKey() : "",
+                        "fileUrl", kb.getStorageUrl() != null ? kb.getStorageUrl() : ""
+                ),
+                "duplicate", true
+        );
     }
 
     /**
