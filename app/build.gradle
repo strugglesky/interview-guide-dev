@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.spring.dependency.management)
 }
 
+
 group = 'org.example.study'
 version = '0.0.1-SNAPSHOT'
 
