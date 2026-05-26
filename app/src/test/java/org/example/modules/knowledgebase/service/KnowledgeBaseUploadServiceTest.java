@@ -15,14 +15,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.redisson.api.stream.StreamMessageId;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,7 +43,6 @@ class KnowledgeBaseUploadServiceTest {
     private static final String STORAGE_KEY = "knowledgebase/2026/05/22/guide.pdf";
     private static final String STORAGE_URL = "http://localhost:9000/bucket/guide.pdf";
     private static final String PARSED_CONTENT = "parsed knowledge base";
-    private static final StreamMessageId MESSAGE_ID = new StreamMessageId(1L, 2L);
 
     @Mock
     private KnowledgeBaseParseService parseService;
@@ -88,7 +88,7 @@ class KnowledgeBaseUploadServiceTest {
             when(persistenceService.save(FILE, "Java 面试题库", CATEGORY, STORAGE_KEY, STORAGE_URL, FILE_HASH))
                     .thenReturn(knowledgeBase);
             when(parseService.parse(FILE)).thenReturn(PARSED_CONTENT);
-            when(vectorizeStreamProducer.sendVectorizeTask(1L, PARSED_CONTENT)).thenReturn(MESSAGE_ID);
+            doNothing().when(vectorizeStreamProducer).sendVectorizeTask(1L, PARSED_CONTENT);
 
             Map<String, Object> result = knowledgeBaseUploadService.upload(FILE, NAME, CATEGORY);
 
@@ -135,7 +135,7 @@ class KnowledgeBaseUploadServiceTest {
             when(persistenceService.save(FILE, "Java 面试题库", CATEGORY, STORAGE_KEY, STORAGE_URL, FILE_HASH))
                     .thenReturn(saved);
             when(parseService.parse(FILE)).thenReturn(PARSED_CONTENT);
-            when(vectorizeStreamProducer.sendVectorizeTask(1L, PARSED_CONTENT)).thenReturn(MESSAGE_ID);
+            doNothing().when(vectorizeStreamProducer).sendVectorizeTask(1L, PARSED_CONTENT);
 
             Map<String, Object> result = knowledgeBaseUploadService.upload(FILE, NAME, CATEGORY);
 
@@ -166,7 +166,7 @@ class KnowledgeBaseUploadServiceTest {
                     FILE_HASH
             )).thenReturn(knowledgeBase);
             when(parseService.parse(FILE)).thenReturn(PARSED_CONTENT);
-            when(vectorizeStreamProducer.sendVectorizeTask(1L, PARSED_CONTENT)).thenReturn(MESSAGE_ID);
+            doNothing().when(vectorizeStreamProducer).sendVectorizeTask(1L, PARSED_CONTENT);
 
             knowledgeBaseUploadService.upload(FILE, "  ", CATEGORY);
 
@@ -196,11 +196,10 @@ class KnowledgeBaseUploadServiceTest {
             knowledgeBase.setOriginalFilename("guide.pdf");
             when(knowledgeBaseRepository.findById(1L)).thenReturn(Optional.of(knowledgeBase));
             when(parseService.parse(STORAGE_KEY, "guide.pdf")).thenReturn(PARSED_CONTENT);
-            when(vectorizeStreamProducer.sendVectorizeTask(1L, PARSED_CONTENT)).thenReturn(MESSAGE_ID);
+            doNothing().when(vectorizeStreamProducer).sendVectorizeTask(1L, PARSED_CONTENT);
 
-            StreamMessageId messageId = knowledgeBaseUploadService.retryVectorization(1L);
-
-            assertThat(messageId).isEqualTo(MESSAGE_ID);
+            assertThatCode(() -> knowledgeBaseUploadService.retryVectorization(1L))
+                    .doesNotThrowAnyException();
             verify(parseService).parse(STORAGE_KEY, "guide.pdf");
             verify(vectorizeStreamProducer).sendVectorizeTask(1L, PARSED_CONTENT);
         }

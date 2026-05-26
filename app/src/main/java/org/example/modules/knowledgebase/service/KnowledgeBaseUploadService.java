@@ -74,10 +74,7 @@ public class KnowledgeBaseUploadService {
 
         // 6. 解析文本内容并发送异步向量化任务。
         String content = parseService.parse(file);
-        StreamMessageId messageId = vectorizeStreamProducer.sendVectorizeTask(
-                knowledgeBase.getId(),
-                content
-        );
+        vectorizeStreamProducer.sendVectorizeTask(knowledgeBase.getId(), content);
         log.info("知识库上传完成，向量化任务已入队: {}, kbId={}", file.getOriginalFilename(), knowledgeBase.getId());
 
         // 7. 返回结果（状态为 PENDING，前端可轮询获取最新状态）
@@ -120,7 +117,7 @@ public class KnowledgeBaseUploadService {
      * @param kbId 知识库ID
      * @return Redis Stream 消息ID
      */
-    public StreamMessageId retryVectorization(Long kbId) {
+    public void retryVectorization(Long kbId) {
         if (kbId == null || kbId <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库ID不合法");
         }
@@ -139,6 +136,8 @@ public class KnowledgeBaseUploadService {
         );
 
         // 3. 将解析结果重新投递到 Redis Stream，交给异步消费者处理。
-        return vectorizeStreamProducer.sendVectorizeTask(kbId, content);
+        vectorizeStreamProducer.sendVectorizeTask(kbId, content);
+
+        log.info("重新向量化任务已发送: kbId={}", kbId);
     }
 }
