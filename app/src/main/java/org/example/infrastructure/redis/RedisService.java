@@ -78,7 +78,26 @@ public class RedisService {
         return redissonClient.getStream(streamKey);
     }
 
+    /**
+     * 发送消息到 Stream（使用默认长度限制）
+     *
+     * @param streamKey Stream 键
+     * @param message   消息内容
+     * @return 消息ID
+     */
     public StreamMessageId addStreamMessage(String streamKey, Map<String, Object> message) {
+        return addStreamMessage(streamKey, message, AsyncTaskStreamConstants.STREAM_MAX_LEN);
+    }
+
+    /**
+     * 发送消息到 Stream（带长度限制）
+     *
+     * @param streamKey Stream 键
+     * @param message   消息内容
+     * @param maxLen    最大长度，超过时自动裁剪旧消息，0 表示不限制
+     * @return 消息ID
+     */
+    public StreamMessageId addStreamMessage(String streamKey, Map<String, Object> message, int maxLen) {
         if (streamKey == null || streamKey.isBlank()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Stream key 不能为空");
         }
@@ -86,8 +105,8 @@ public class RedisService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Stream 消息不能为空");
         }
         StreamAddArgs<String, Object> args = StreamAddArgs.entries(message);
-        if (AsyncTaskStreamConstants.STREAM_MAX_LEN > 0) {
-            args = args.trim().maxLen(AsyncTaskStreamConstants.STREAM_MAX_LEN);
+        if (maxLen > 0) {
+            args = args.trim().maxLen(maxLen).noLimit();
         }
         return getStream(streamKey).add(args);
     }
