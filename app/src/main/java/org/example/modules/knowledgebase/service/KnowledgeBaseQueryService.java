@@ -15,8 +15,9 @@ import org.springframework.stereotype.Service;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class KnowledgeBaseQueryService {
-    private final ChatClient chatClient;
+//    private final ChatClient chatClient;
     private final KnowledgeBaseVectorService knowledgeBaseVectorService;
     private final KnowledgeBaseListService knowledgeBaseListService;
 
