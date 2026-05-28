@@ -7,19 +7,17 @@ import org.example.infrastructure.file.FileStorageService;
 import org.example.infrastructure.file.FileValidationService;
 import org.example.modules.knowledgebase.listener.VectorizeStreamProducer;
 import org.example.modules.knowledgebase.repository.KnowledgeBaseRepository;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
-
+/**
+ * 知识库查询服务
+ * 基于向量搜索的RAG问答
+ */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class KnowledgeBaseQueryService {
-    private final KnowledgeBaseParseService parseService;
-    private final KnowledgeBasePersistenceService persistenceService;
-    private final FileStorageService storageService;
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
-    private final FileValidationService fileValidationService;
-    private final FileHashService fileHashService;
-    private final VectorizeStreamProducer vectorizeStreamProducer;
-
+    private final ChatClient chatClient;
+    private final KnowledgeBaseVectorService knowledgeBaseVectorService;
+    private final KnowledgeBaseListService knowledgeBaseListService;
 
 }

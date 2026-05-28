@@ -7,5 +7,5 @@ import org.mapstruct.Mapper;
  * 使用MapStruct自动生成转换代码
  */
 @Mapper
-public class RagChatMapper {
+public interface RagChatMapper {
 }
