@@ -19,6 +19,7 @@ import org.springframework.core.io.DefaultResourceLoader;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.List;
 
@@ -271,9 +272,17 @@ class KnowledgeBaseQueryServiceTest {
     }
 
     private Message buildMessage(String text, MessageType messageType) {
-        Message message = mock(Message.class);
-        when(message.getText()).thenReturn(text);
-        when(message.getMessageType()).thenReturn(messageType);
-        return message;
+        return (Message) Proxy.newProxyInstance(
+                Message.class.getClassLoader(),
+                new Class[]{Message.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getText" -> text;
+                    case "getMessageType" -> messageType;
+                    case "toString" -> messageType + ":" + text;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> null;
+                }
+        );
     }
 }
