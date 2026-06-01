@@ -1,4 +1,4 @@
-package org.example.modules.knowledgebase;
+package org.example.modules.knowledgebase.controller;
 
 import org.springframework.web.bind.annotation.RestController;
 

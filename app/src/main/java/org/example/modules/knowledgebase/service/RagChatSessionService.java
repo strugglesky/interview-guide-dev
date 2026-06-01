@@ -65,7 +65,7 @@ public class RagChatSessionService {
         RagChatSessionEntity savedSession = ragChatSessionRepository.save(session);
         return new RagChatDTO.SessionDTO(
                 savedSession.getId(),
-                savedSession.getTitle(),
+                generateTitle(knowledgeBases),
                 knowledgeBaseIds,
                 savedSession.getCreatedAt()
         );
@@ -343,15 +343,7 @@ public class RagChatSessionService {
         if (!queryProperties.getHistory().isEnabled()) {
             return List.of();
         }
-        int limit = Math.max(1, queryProperties.getHistory().getMaxMessages() + 1);
-        List<RagChatMessageEntity> recentMessages = ragChatMessageRepository
-                .findRecentCompletedBySessionId(sessionId, PageRequest.of(0, limit));
-        List<RagChatMessageEntity> orderedMessages = toAscendingMessages(recentMessages);
-        List<RagChatMessageEntity> historyMessages = removeDuplicatedQuestion(
-                orderedMessages,
-                question
-        );
-        return historyMessages.stream().map(this::toAiMessage).toList();
+        return loadHistoryMessages(sessionId);
     }
 
     private List<RagChatMessageEntity> toAscendingMessages(List<RagChatMessageEntity> messages) {
@@ -385,4 +377,41 @@ public class RagChatSessionService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Session ID is invalid");
         }
     }
+
+    /**
+     * 加载会话中最近的历史消息作为多轮上下文。
+     * 排除当前轮的 user 消息（prepareStreamMessage 中 completed=true 但尚未回答）。
+     */
+    private List<Message> loadHistoryMessages(Long sessionId) {
+        int limit = queryProperties.getHistory().getMaxMessages() + 1;
+        List<RagChatMessageEntity> recent = ragChatMessageRepository
+                .findRecentCompletedBySessionId(sessionId, PageRequest.of(0, limit));
+
+        if (recent.isEmpty()) {
+            return List.of();
+        }
+
+        // 查询结果按 messageOrder DESC 排列，最后一条（DESC 首条）是当前轮的 user 消息，排除
+        List<RagChatMessageEntity> historyMessages = recent.size() <= 1
+                ? List.of()
+                : recent.subList(1, recent.size());
+
+        // 反转为正序（时间从早到晚）
+        return historyMessages.reversed().stream()
+                .map(m -> m.getType() == RagChatMessageEntity.MessageType.USER
+                        ? (Message) new UserMessage(m.getContent())
+                        : (Message) new AssistantMessage(m.getContent()))
+                .toList();
+    }
+
+    private String generateTitle(List<KnowledgeBaseEntity> knowledgeBases) {
+        if (knowledgeBases.isEmpty()) {
+            return "新对话";
+        }
+        if (knowledgeBases.size() == 1) {
+            return knowledgeBases.getFirst().getName();
+        }
+        return knowledgeBases.size() + " 个知识库对话";
+    }
+
 }
