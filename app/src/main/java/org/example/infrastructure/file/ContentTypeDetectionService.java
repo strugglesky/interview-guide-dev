@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -89,7 +90,8 @@ public class ContentTypeDetectionService {
 
         Metadata metadata = buildMetadata(fileName, contentType);
         try {
-            MediaType mediaType = TIKA.getDetector().detect(inputStream, metadata);
+            InputStream detectionStream = prepareDetectionStream(inputStream);
+            MediaType mediaType = TIKA.getDetector().detect(detectionStream, metadata);
             return mediaType.toString();
         } catch (IOException e) {
             log.error("Content type detection failed: fileName={}, contentType={}", fileName, contentType, e);
@@ -113,5 +115,13 @@ public class ContentTypeDetectionService {
             metadata.set(Metadata.CONTENT_TYPE, contentType);
         }
         return metadata;
+    }
+
+    private InputStream prepareDetectionStream(InputStream inputStream) {
+        InputStream detectionStream = inputStream.markSupported()
+                ? inputStream
+                : new BufferedInputStream(inputStream);
+        detectionStream.mark(8192);
+        return detectionStream;
     }
 }

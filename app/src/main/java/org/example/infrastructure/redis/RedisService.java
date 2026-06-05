@@ -125,7 +125,14 @@ public class RedisService {
         StreamReadGroupArgs args = StreamReadGroupArgs.neverDelivered()
                 .count(count)
                 .timeout(timeout);
-        return getStream(streamKey).readGroup(group, consumer, args);
+        try {
+            return getStream(streamKey).readGroup(group, consumer, args);
+        } catch (ClassCastException e) {
+            if (isEmptyStreamReadResult(e)) {
+                return Map.of();
+            }
+            throw e;
+        }
     }
 
     public long ackStreamMessage(String streamKey, String group, StreamMessageId... messageIds) {
@@ -134,5 +141,12 @@ public class RedisService {
 
     public long deleteStreamMessage(String streamKey, StreamMessageId... messageIds) {
         return getStream(streamKey).remove(messageIds);
+    }
+
+    private boolean isEmptyStreamReadResult(ClassCastException exception) {
+        String message = exception.getMessage();
+        return message != null
+                && message.contains("java.util.Collections$EmptyList")
+                && message.contains("java.util.Map");
     }
 }

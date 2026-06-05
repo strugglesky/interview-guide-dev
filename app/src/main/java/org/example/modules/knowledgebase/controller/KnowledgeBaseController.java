@@ -124,7 +124,7 @@ public class KnowledgeBaseController {
     /**
      * 根据分类获取知识库列表
      */
-    @GetMapping("/api/knowledgebase/categories/{category}")
+    @GetMapping("/api/knowledgebase/category/{category}")
     public Result<List<KnowledgeBaseListItemDTO>> getKnowledgeBasesByCategory(
             @PathVariable String category) {
         return Result.success(listService.listKnowledgeBasesByCategory(category));

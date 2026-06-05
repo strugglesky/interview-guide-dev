@@ -19,8 +19,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public abstract class VectorizeStreamConsumer
-        extends AbstractStreamConsumer<VectorizeStreamConsumer.VectorizePayload> {
+public class VectorizeStreamConsumer extends AbstractStreamConsumer<VectorizeStreamConsumer.VectorizePayload> {
 
     private final RedisService redisService;
     private final KnowledgeBaseVectorService vectorService;

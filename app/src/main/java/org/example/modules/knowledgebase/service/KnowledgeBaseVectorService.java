@@ -29,9 +29,12 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class KnowledgeBaseVectorService {
+    private static final int EMBEDDING_BATCH_SIZE = 10;
+
     private final VectorStore vectorStore;
     private final TextSplitter textSplitter;
     private final VectorRepository vectorRepository;
+
     public KnowledgeBaseVectorService(VectorStore vectorStore, VectorRepository vectorRepository) {
         this.vectorStore = vectorStore;
         this.vectorRepository = vectorRepository;
@@ -53,29 +56,12 @@ public class KnowledgeBaseVectorService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "文档内容不能为空");
         }
         try {
-            // 为原文档和后续分块统一补充知识库标识元数据
-            Map<String, Object> metadata = new LinkedHashMap<>();
-            metadata.put("knowledgeBaseId", knowledgeBaseId);
-            metadata.put("kb_id", knowledgeBaseId.toString());
-            metadata.put("kb_id_long", knowledgeBaseId);
-
-            // 先切分文档，再为每个有效分块补齐元数据
-            Document source = new Document(content, metadata);
-            List<Document> chunks = textSplitter.apply(List.of(source)).stream()
-                    .filter(document -> document != null && StringUtils.hasText(document.getText()))
-                    .map(document -> {
-                        Map<String, Object> chunkMetadata = new LinkedHashMap<>(document.getMetadata());
-                        chunkMetadata.putAll(metadata);
-                        return new Document(document.getText(), chunkMetadata);
-                    })
-                    .toList();
-            // 没有可入库分块时直接结束，避免写入空数据
+            List<Document> chunks = buildChunks(knowledgeBaseId, content);
             if (chunks.isEmpty()) {
                 log.warn("知识库内容分块结果为空，跳过向量化: kbId={}", knowledgeBaseId);
                 return;
             }
-            // 将分块结果批量写入向量库
-            vectorStore.add(chunks);
+            addChunksInBatches(chunks);
             log.info("知识库向量化完成: kbId={}, chunkCount={}", knowledgeBaseId, chunks.size());
         } catch (BusinessException e) {
             throw e;
@@ -88,6 +74,7 @@ public class KnowledgeBaseVectorService {
             );
         }
     }
+
     /**
      * 搜索相似文档
      *
@@ -176,6 +163,31 @@ public class KnowledgeBaseVectorService {
             // 不抛出异常，允许继续执行其他删除操作
             // 如果确实需要严格保证，可以取消下面的注释
 //             throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_DELETE_FAILED, "删除向量数据失败");
+        }
+    }
+
+    private List<Document> buildChunks(Long knowledgeBaseId, String content) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("knowledgeBaseId", knowledgeBaseId);
+        metadata.put("kb_id", knowledgeBaseId.toString());
+        metadata.put("kb_id_long", knowledgeBaseId);
+        Document source = new Document(content, metadata);
+        return textSplitter.apply(List.of(source)).stream()
+                .filter(document -> document != null && StringUtils.hasText(document.getText()))
+                .map(document -> buildChunkDocument(document, metadata))
+                .toList();
+    }
+
+    private Document buildChunkDocument(Document document, Map<String, Object> metadata) {
+        Map<String, Object> chunkMetadata = new LinkedHashMap<>(document.getMetadata());
+        chunkMetadata.putAll(metadata);
+        return new Document(document.getText(), chunkMetadata);
+    }
+
+    private void addChunksInBatches(List<Document> chunks) {
+        for (int start = 0; start < chunks.size(); start += EMBEDDING_BATCH_SIZE) {
+            int end = Math.min(start + EMBEDDING_BATCH_SIZE, chunks.size());
+            vectorStore.add(chunks.subList(start, end));
         }
     }
 
