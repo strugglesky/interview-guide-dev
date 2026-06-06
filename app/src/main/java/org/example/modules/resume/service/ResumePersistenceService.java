@@ -3,7 +3,6 @@ package org.example.modules.resume.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.common.exception.BusinessException;
@@ -37,7 +36,7 @@ public class ResumePersistenceService {
     private final ObjectMapper objectMapper;
     private final ResumeMapper resumeMapper;
     private final FileHashService fileHashService;
-    private final EntityManager entityManager;
+
 
     /**
      * 查询简历是否已存在（基于文件内容hash）
@@ -47,10 +46,13 @@ public class ResumePersistenceService {
      */
     public Optional<ResumeEntity> findExistingResume(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历文件不能为空");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件不能为空");
         }
-        // 先基于文件内容计算哈希，再用唯一索引字段做去重查询。
         String fileHash = fileHashService.calculateHash(file);
+        if (!resumeRepository.existsByFileHash(fileHash)) {
+            return Optional.empty();
+        }
+        log.info("检测到重复简历: method=findExistingResume, fileHash={}", fileHash);
         return resumeRepository.findByFileHash(fileHash);
     }
 
@@ -63,28 +65,33 @@ public class ResumePersistenceService {
      * @return 新的简历实体
      */
     @Transactional(rollbackFor = Exception.class)
-    public ResumeEntity saveResume(MultipartFile file, String resumeText,
-                                   String storageKey, String storageUrl) {
+    public ResumeEntity saveResume(
+            MultipartFile file,
+            String resumeText,
+            String storageKey,
+            String storageUrl
+    ) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历文件不能为空");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件不能为空");
         }
         if (!StringUtils.hasText(resumeText)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "简历文本不能为空");
         }
-        String fileHash = fileHashService.calculateHash(file);
-        if (resumeRepository.existsByFileHash(fileHash)) {
-            throw new BusinessException(ErrorCode.RESUME_DUPLICATE, "简历已存在");
+        if (!StringUtils.hasText(storageKey)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历文件存储路径不能为空");
         }
-
+        if (!StringUtils.hasText(storageUrl)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历文件访问地址不能为空");
+        }
+        String fileHash = fileHashService.calculateHash(file);
         ResumeEntity resume = new ResumeEntity();
-        // 保存时把上传文件元数据、对象存储信息和解析后的文本一次性落库。
         resume.setFileHash(fileHash);
         resume.setOriginalFilename(file.getOriginalFilename());
         resume.setFileSize(file.getSize());
         resume.setContentType(file.getContentType());
         resume.setStorageKey(storageKey);
         resume.setStorageUrl(storageUrl);
-        resume.setResumeText(resumeText.strip());
+        resume.setResumeText(resumeText);
         resume.setAnalyzeStatus(AsyncTaskStatus.PENDING);
         resume.setAnalyzeError(null);
         return resumeRepository.save(resume);
@@ -99,28 +106,30 @@ public class ResumePersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public ResumeAnalysisEntity saveAnalysis(ResumeEntity resume, ResumeAnalysisResponse response) {
         if (resume == null || resume.getId() == null) {
-            throw new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历实体不能为空");
         }
         if (response == null) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历分析结果不能为空");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "评测结果不能为空");
         }
         try {
-            ResumeAnalysisEntity analysis = resumeMapper.toAnalysisEntity(response);
-            // JSON 字段需要在 Service 层显式序列化，MapStruct 只负责基础字段映射。
-            analysis.setResume(resume);
-            analysis.setStrengthsJson(objectMapper.writeValueAsString(response.strengths()));
-            analysis.setSuggestionsJson(objectMapper.writeValueAsString(response.suggestions()));
-            ResumeAnalysisEntity saved = entityManager.merge(analysis);
+            ResumeAnalysisEntity entity = resumeMapper.toAnalysisEntity(response);
+            entity.setResume(resume);
+            entity.setStrengthsJson(objectMapper.writeValueAsString(response.strengths()));
+            entity.setSuggestionsJson(objectMapper.writeValueAsString(response.suggestions()));
+            ResumeAnalysisEntity savedEntity = resumeAnalysisRepository.save(entity);
             resume.setAnalyzeStatus(AsyncTaskStatus.COMPLETED);
             resume.setAnalyzeError(null);
             resumeRepository.save(resume);
-            return saved;
+            return savedEntity;
         } catch (JsonProcessingException e) {
-            throw new BusinessException(
-                    ErrorCode.RESUME_ANALYSIS_FAILED,
-                    "简历分析结果序列化失败",
+            log.error(
+                    "保存简历分析失败: method=saveAnalysis, resumeId={}, strengthsSize={}, suggestionsSize={}",
+                    resume.getId(),
+                    response.strengths() == null ? 0 : response.strengths().size(),
+                    response.suggestions() == null ? 0 : response.suggestions().size(),
                     e
             );
+            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "简历评测结果序列化失败", e);
         }
     }
 
@@ -133,12 +142,12 @@ public class ResumePersistenceService {
         if (resumeId == null || resumeId <= 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "简历ID不合法");
         }
-        ResumeAnalysisEntity analysis =
+        ResumeAnalysisEntity entity =
                 resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId);
-        if (analysis == null) {
+        if (entity == null) {
             throw new BusinessException(ErrorCode.RESUME_ANALYSIS_NOT_FOUND, "简历分析结果不存在");
         }
-        return analysis;
+        return entity;
     }
 
     /**
@@ -147,14 +156,12 @@ public class ResumePersistenceService {
      * @return 最新的评测结果DTO
      */
     public Optional<ResumeAnalysisResponse> getLatestAnalysisDTO(Long resumeId) {
-        try {
-            return Optional.ofNullable(getLatestAnalysis(resumeId)).map(this::entityToDTO);
-        } catch (BusinessException e) {
-            if (ErrorCode.RESUME_ANALYSIS_NOT_FOUND.getCode().equals(e.getCode())) {
-                return Optional.empty();
-            }
-            throw e;
+        if (resumeId == null || resumeId <= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历ID不合法");
         }
+        ResumeAnalysisEntity entity =
+                resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId);
+        return entity == null ? Optional.empty() : Optional.of(entityToDTO(entity));
     }
 
     /**
@@ -179,33 +186,35 @@ public class ResumePersistenceService {
      */
     public ResumeAnalysisResponse entityToDTO(ResumeAnalysisEntity entity) {
         if (entity == null) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历分析实体不能为空");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "简历分析结果不能为空");
         }
         try {
             List<String> strengths = StringUtils.hasText(entity.getStrengthsJson())
-                    ? objectMapper.readValue(entity.getStrengthsJson(), new TypeReference<>() {})
+                    ? objectMapper.readValue(entity.getStrengthsJson(), new TypeReference<List<String>>() {})
                     : List.of();
             List<ResumeAnalysisResponse.Suggestion> suggestions =
                     StringUtils.hasText(entity.getSuggestionsJson())
                             ? objectMapper.readValue(
                                     entity.getSuggestionsJson(),
-                                    new TypeReference<>() {}
+                                    new TypeReference<List<ResumeAnalysisResponse.Suggestion>>() {}
                             )
                             : List.of();
             return new ResumeAnalysisResponse(
-                    entity.getOverallScore() != null ? entity.getOverallScore() : 0,
+                    entity.getOverallScore() == null ? 0 : entity.getOverallScore(),
                     resumeMapper.toScoreDetail(entity),
                     entity.getSummary(),
                     strengths,
                     suggestions,
-                    entity.getResume() != null ? entity.getResume().getResumeText() : null
+                    entity.getResume() == null ? null : entity.getResume().getResumeText()
             );
         } catch (JsonProcessingException e) {
-            throw new BusinessException(
-                    ErrorCode.RESUME_ANALYSIS_FAILED,
-                    "简历分析结果反序列化失败",
+            log.error(
+                    "将简历分析实体转换为 DTO 失败: method=entityToDTO, analysisId={}, resumeId={}",
+                    entity.getId(),
+                    entity.getResume() == null ? null : entity.getResume().getId(),
                     e
             );
+            throw new BusinessException(ErrorCode.RESUME_ANALYSIS_FAILED, "简历评测结果反序列化失败", e);
         }
     }
 
@@ -229,15 +238,8 @@ public class ResumePersistenceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "简历ID不合法");
         }
         ResumeEntity resume = resumeRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.RESUME_NOT_FOUND,
-                        "简历不存在"
-                ));
-        // 先删除所有分析记录，再删除简历主记录，避免外键约束或脏数据残留。
-        List<ResumeAnalysisEntity> analyses = resumeAnalysisRepository.findByResumeId(resume);
-        for (ResumeAnalysisEntity analysis : analyses) {
-            entityManager.remove(entityManager.contains(analysis) ? analysis : entityManager.merge(analysis));
-        }
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
+        resumeAnalysisRepository.deleteAll(resumeAnalysisRepository.findByResumeId(resume));
         resumeRepository.delete(resume);
     }
 }
