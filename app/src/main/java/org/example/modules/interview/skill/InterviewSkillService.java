@@ -114,7 +114,7 @@ public class InterviewSkillService {
      * - 构建 category→reference 索引并生成参考文件清单cachedReferenceFileList
      */
     @PostConstruct
-    void loadPresetSkills() throws Exception{
+    public void loadPresetSkills() throws Exception{
         presetRegistry.clear();
         categoryRefIndex.clear();
         Resource[] resources = new PathMatchingResourcePatternResolver(resourceLoader)
