@@ -100,7 +100,7 @@ class ResumeControllerTest {
             when(resumeHistoryService.getResumeDetail(2L)).thenReturn(expected);
 
             // 详情接口的关键是确保路径参数被原样透传。
-            Result<ResumeListItemDTO> result = resumeController.getResumeDetail(2L);
+            Result<ResumeDetailDTO> result = resumeController.getResumeDetail(2L);
 
             assertSuccess(result);
             assertThat(result.getData()).isEqualTo(expected);

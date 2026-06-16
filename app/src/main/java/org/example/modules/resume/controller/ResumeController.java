@@ -1,19 +1,27 @@
 package org.example.modules.resume.controller;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.websocket.OnClose;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.common.annotation.RateLimit;
 import org.example.common.result.Result;
+import org.example.modules.resume.model.ResumeDetailDTO;
 import org.example.modules.resume.model.ResumeListItemDTO;
 import org.example.modules.resume.service.ResumeDeleteService;
 import org.example.modules.resume.service.ResumeHistoryService;
 import org.example.modules.resume.service.ResumeUploadService;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -35,25 +43,42 @@ public class ResumeController {
     @PostMapping(value =  "/api/resumes/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
-    public Result<Map<String, Object>> uploadAndAnalyze(@RequestParam("file") MultipartFile file) {}
+    public Result<Map<String, Object>> uploadAndAnalyze(@RequestParam("file") MultipartFile file) {
+        return Result.success(resumeUploadService.uploadAndAnalyze(file));
+    }
 
     /**
      * 获取所有简历列表
      */
     @GetMapping("/api/resumes")
-    public Result<List<ResumeListItemDTO>> getAllResumes() {}
+    public Result<List<ResumeListItemDTO>> getAllResumes() {
+        return Result.success(resumeHistoryService.getAllResumes());
+    }
 
     /**
      * 获取简历详情（包含分析历史）
      */
     @GetMapping("/api/resumes/{id}/detail")
-    public Result<ResumeListItemDTO> getResumeDetail(@PathVariable Long id) {}
+    public Result<ResumeDetailDTO> getResumeDetail(@PathVariable Long id) {
+        return Result.success(resumeHistoryService.getResumeDetail(id));
+    }
 
     /**
      * 导出简历分析报告为PDF
      */
     @GetMapping("/api/resumes/{id}/export")
-    public ResponseEntity<byte[]> exportAnalysisPdf(@PathVariable Long id) {}
+    public ResponseEntity<byte[]> exportAnalysisPdf(@PathVariable Long id) {
+        ResumeHistoryService.ExportResult exportResult =
+                resumeHistoryService.exportResumeAnalysisReport(id);
+        String contentDisposition = ContentDisposition.attachment()
+                .filename(exportResult.filename(), StandardCharsets.UTF_8)
+                .build()
+                .toString();
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
+                .body(exportResult.pdfBytes());
+    }
 
     /**
      * 删除简历
@@ -62,7 +87,10 @@ public class ResumeController {
      * @return 删除结果
      */
     @DeleteMapping("/api/resumes/{id}")
-    public Result<Void> deleteResume(@PathVariable Long id) {}
+    public Result<Void> deleteResume(@PathVariable Long id) {
+        resumeDeleteService.deleteResume(id);
+        return Result.success();
+    }
 
     /**
      * 重新分析简历（手动重试）
@@ -74,7 +102,10 @@ public class ResumeController {
     @PostMapping("/api/resumes/{id}/reanalyze")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
     @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
-    public Result<Void> reanalyze(@PathVariable Long id) {}
+    public Result<Void> reanalyze(@PathVariable Long id) {
+        resumeUploadService.reanalyze(id);
+        return Result.success();
+    }
 
     /**
      * 健康检查接口

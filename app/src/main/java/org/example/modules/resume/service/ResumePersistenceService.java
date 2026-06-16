@@ -143,7 +143,7 @@ public class ResumePersistenceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "简历ID不合法");
         }
         ResumeAnalysisEntity entity =
-                resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId);
+                resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(resumeId);
         if (entity == null) {
             throw new BusinessException(ErrorCode.RESUME_ANALYSIS_NOT_FOUND, "简历分析结果不存在");
         }
@@ -160,7 +160,7 @@ public class ResumePersistenceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "简历ID不合法");
         }
         ResumeAnalysisEntity entity =
-                resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(resumeId);
+                resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(resumeId);
         return entity == null ? Optional.empty() : Optional.of(entityToDTO(entity));
     }
 
@@ -239,7 +239,7 @@ public class ResumePersistenceService {
         }
         ResumeEntity resume = resumeRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
-        resumeAnalysisRepository.deleteAll(resumeAnalysisRepository.findByResumeId(resume));
+        resumeAnalysisRepository.deleteAll(resumeAnalysisRepository.findByResume(resume));
         resumeRepository.delete(resume);
     }
 }

@@ -183,7 +183,7 @@ class ResumePersistenceServiceTest {
         @DisplayName("应返回最新评测结果")
         void shouldReturnLatestAnalysis() {
             ResumeAnalysisEntity entity = new ResumeAnalysisEntity();
-            when(resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(1L)).thenReturn(entity);
+            when(resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(1L)).thenReturn(entity);
 
             ResumeAnalysisEntity result = resumePersistenceService.getLatestAnalysis(1L);
 
@@ -193,7 +193,7 @@ class ResumePersistenceServiceTest {
         @Test
         @DisplayName("最新评测结果不存在时应抛出业务异常")
         void shouldThrowWhenLatestAnalysisNotFound() {
-            when(resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(1L)).thenReturn(null);
+            when(resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(1L)).thenReturn(null);
 
             assertThatThrownBy(() -> resumePersistenceService.getLatestAnalysis(1L))
                     .isInstanceOf(BusinessException.class)
@@ -209,7 +209,7 @@ class ResumePersistenceServiceTest {
         @Test
         @DisplayName("评测结果不存在时应返回空")
         void shouldReturnEmptyWhenLatestAnalysisNotFound() {
-            when(resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(1L)).thenReturn(null);
+            when(resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(1L)).thenReturn(null);
 
             Optional<ResumeAnalysisResponse> result = resumePersistenceService.getLatestAnalysisDTO(1L);
 
@@ -220,7 +220,7 @@ class ResumePersistenceServiceTest {
         @DisplayName("评测结果存在时应返回DTO")
         void shouldReturnDtoWhenLatestAnalysisExists() throws Exception {
             ResumeAnalysisEntity entity = buildAnalysisEntity();
-            when(resumeAnalysisRepository.findFirstByResumeIdOrderByCreatedAtDesc(1L)).thenReturn(entity);
+            when(resumeAnalysisRepository.findFirstByResumeIdOrderByAnalyzedAtDesc(1L)).thenReturn(entity);
             when(resumeMapper.toScoreDetail(entity)).thenReturn(
                     new ResumeAnalysisResponse.ScoreDetail(20, 18, 22, 12, 14)
             );
@@ -323,7 +323,7 @@ class ResumePersistenceServiceTest {
             ResumeEntity resume = buildResumeEntity(1L);
             List<ResumeAnalysisEntity> analyses = List.of(new ResumeAnalysisEntity(), new ResumeAnalysisEntity());
             when(resumeRepository.findById(1L)).thenReturn(Optional.of(resume));
-            when(resumeAnalysisRepository.findByResumeId(resume)).thenReturn(analyses);
+            when(resumeAnalysisRepository.findByResume(resume)).thenReturn(analyses);
 
             resumePersistenceService.deleteResume(1L);
 
