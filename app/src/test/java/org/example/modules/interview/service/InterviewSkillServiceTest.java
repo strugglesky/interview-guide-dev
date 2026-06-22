@@ -4,6 +4,7 @@ import org.example.common.ai.LlmProviderRegistry;
 import org.example.common.ai.PromptSanitizer;
 import org.example.common.ai.StructuredOutputInvoker;
 import org.example.common.config.InterviewSkillProperties;
+import org.example.common.config.LlmProviderProperties;
 import org.example.common.exception.BusinessException;
 import org.example.common.model.ErrorCode;
 import org.example.modules.interview.skill.InterviewSkillService;
@@ -305,7 +306,7 @@ class InterviewSkillServiceTest {
                 llmProviderRegistry,
                 structuredOutputInvoker,
                 new DefaultResourceLoader(),
-                new PromptSanitizer()
+                new PromptSanitizer(new LlmProviderProperties())
         );
     }
 
