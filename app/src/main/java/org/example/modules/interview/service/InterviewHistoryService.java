@@ -8,6 +8,7 @@ import org.example.infrastructure.export.PdfExportService;
 import org.example.infrastructure.mapper.InterviewMapper;
 import org.example.modules.interview.model.InterviewAnswerEntity;
 import org.example.modules.interview.model.InterviewDetailDTO;
+import org.example.modules.interview.model.InterviewSessionEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import tools.jackson.core.JacksonException;
@@ -15,6 +16,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 面试历史服务
@@ -115,6 +117,24 @@ public class InterviewHistoryService {
     private void validateSessionId(String sessionId) {
         if (!StringUtils.hasText(sessionId)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "面试会话ID不能为空");
+        }
+    }
+
+    /**
+     * 导出面试报告为PDF
+     */
+    public byte[] exportInterviewPdf(String sessionId) {
+        Optional<InterviewSessionEntity> sessionOpt = interviewPersistenceService.findBySessionId(sessionId);
+        if (sessionOpt.isEmpty()) {
+            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
+        }
+
+        InterviewSessionEntity session = sessionOpt.get();
+        try {
+            return pdfExportService.exportInterviewReport(session);
+        } catch (Exception e) {
+            log.error("导出PDF失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出PDF失败: " + e.getMessage());
         }
     }
 }

@@ -9,6 +9,8 @@ import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
 import org.example.common.exception.BusinessException;
 import org.example.common.model.AsyncTaskStatus;
 import org.example.common.model.ErrorCode;
+import org.example.modules.interview.model.InterviewAnswerEntity;
+import org.example.modules.interview.model.InterviewSessionEntity;
 import org.example.modules.resume.model.ResumeAnalysisResponse;
 import org.example.modules.resume.model.ResumeEntity;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +19,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,7 +73,7 @@ class PdfExportServiceTest {
             ResumeAnalysisResponse analysis = new ResumeAnalysisResponse(
                     60,
                     null,
-                    "总体表现稳定",
+                    "整体表现稳定",
                     List.of(),
                     List.of(),
                     "resume text"
@@ -85,6 +89,42 @@ class PdfExportServiceTest {
             assertThat(pdfText).contains("技能匹配度：0");
             assertThat(pdfText).contains("暂无亮点总结");
             assertThat(pdfText).contains("暂无改进建议");
+        }
+    }
+
+    @Nested
+    @DisplayName("导出面试报告PDF")
+    class ExportInterviewReport {
+
+        @Test
+        @DisplayName("应导出包含面试信息和问答详情的PDF")
+        void shouldExportInterviewReportPdf() throws Exception {
+            InterviewSessionEntity session = buildInterviewSession();
+
+            byte[] pdfBytes = pdfExportService.exportInterviewReport(session);
+
+            assertThat(pdfBytes).isNotEmpty();
+            assertThat(new String(pdfBytes, 0, 4)).isEqualTo("%PDF");
+            String pdfText = extractPdfText(pdfBytes);
+            assertThat(pdfText).contains("模拟面试报告");
+            assertThat(pdfText).contains("会话ID：session-1");
+            assertThat(pdfText).contains("题目数量：2");
+            assertThat(pdfText).contains("面试状态：已评估");
+            assertThat(pdfText).contains("综合评分");
+            assertThat(pdfText).contains("总分：92 / 100");
+            assertThat(pdfText).contains("总体评价");
+            assertThat(pdfText).contains("表达清晰，项目经验扎实");
+            assertThat(pdfText).contains("表现优势");
+            assertThat(pdfText).contains("项目经历具体");
+            assertThat(pdfText).contains("改进建议");
+            assertThat(pdfText).contains("补充压测数据");
+            assertThat(pdfText).contains("问答详情");
+            assertThat(pdfText).contains("问题 1 [项目经验]");
+            assertThat(pdfText).contains("请介绍一下你做过的核心项目");
+            assertThat(pdfText).contains("Q: 请介绍一下你做过的核心项目");
+            assertThat(pdfText).contains("A: 我负责订单系统的架构设计与性能优化。");
+            assertThat(pdfText).contains("得分: 95/100");
+            assertThat(pdfText).contains("参考答案: 可以从背景、职责、难点和结果四个方面展开");
         }
     }
 
@@ -122,6 +162,27 @@ class PdfExportServiceTest {
             ResumeEntity resume = buildResume();
 
             assertThatThrownBy(() -> pdfExportService.exportResumeAnalysis(resume, null))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(exception -> assertThat(((BusinessException) exception).getCode())
+                            .isEqualTo(ErrorCode.BAD_REQUEST.getCode()));
+        }
+
+        @Test
+        @DisplayName("面试会话为空时应抛出业务异常")
+        void shouldThrowWhenInterviewSessionNull() {
+            assertThatThrownBy(() -> pdfExportService.exportInterviewReport(null))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(exception -> assertThat(((BusinessException) exception).getCode())
+                            .isEqualTo(ErrorCode.BAD_REQUEST.getCode()));
+        }
+
+        @Test
+        @DisplayName("面试会话ID为空时应抛出业务异常")
+        void shouldThrowWhenInterviewSessionIdBlank() {
+            InterviewSessionEntity session = buildInterviewSessionSilently();
+            session.setSessionId(" ");
+
+            assertThatThrownBy(() -> pdfExportService.exportInterviewReport(session))
                     .isInstanceOf(BusinessException.class)
                     .satisfies(exception -> assertThat(((BusinessException) exception).getCode())
                             .isEqualTo(ErrorCode.BAD_REQUEST.getCode()));
@@ -181,6 +242,68 @@ class PdfExportServiceTest {
                 ),
                 "Java resume content"
         );
+    }
+
+    private InterviewSessionEntity buildInterviewSession() throws JsonProcessingException {
+        InterviewSessionEntity session = new InterviewSessionEntity();
+        session.setSessionId("session-1");
+        session.setTotalQuestions(2);
+        session.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
+        session.setCreatedAt(LocalDateTime.of(2026, 6, 23, 10, 0, 0));
+        session.setCompletedAt(LocalDateTime.of(2026, 6, 23, 10, 30, 0));
+        session.setOverallScore(92);
+        session.setOverallFeedback("表达清晰，项目经验扎实");
+        session.setStrengthsJson(objectMapper.writeValueAsString(List.of("项目经历具体", "回答结构完整")));
+        session.setImprovementsJson(objectMapper.writeValueAsString(List.of("补充压测数据")));
+        session.setAnswers(new ArrayList<>(List.of(
+                buildInterviewAnswer(
+                        0,
+                        "请介绍一下你做过的核心项目",
+                        "项目经验",
+                        "我负责订单系统的架构设计与性能优化。",
+                        95,
+                        "回答完整，重点明确",
+                        "可以从背景、职责、难点和结果四个方面展开"
+                ),
+                buildInterviewAnswer(
+                        1,
+                        "MySQL 索引失效的常见场景有哪些",
+                        "MySQL",
+                        "对索引列做函数操作、隐式类型转换都可能导致索引失效。",
+                        89,
+                        "覆盖了主要场景",
+                        null
+                )
+        )));
+        return session;
+    }
+
+    private InterviewSessionEntity buildInterviewSessionSilently() {
+        try {
+            return buildInterviewSession();
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private InterviewAnswerEntity buildInterviewAnswer(
+            int questionIndex,
+            String question,
+            String category,
+            String userAnswer,
+            Integer score,
+            String feedback,
+            String referenceAnswer
+    ) {
+        InterviewAnswerEntity answer = new InterviewAnswerEntity();
+        answer.setQuestionIndex(questionIndex);
+        answer.setQuestion(question);
+        answer.setCategory(category);
+        answer.setUserAnswer(userAnswer);
+        answer.setScore(score);
+        answer.setFeedback(feedback);
+        answer.setReferenceAnswer(referenceAnswer);
+        return answer;
     }
 
     private String extractPdfText(byte[] pdfBytes) throws IOException {
