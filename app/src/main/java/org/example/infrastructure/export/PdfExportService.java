@@ -59,7 +59,8 @@ public class PdfExportService {
      */
     public byte[] exportResumeAnalysis(ResumeEntity resume, ResumeAnalysisResponse analysis) {
         validateExportParams(resume, analysis);
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (outputStream;
              PdfWriter writer = new PdfWriter(outputStream);
              PdfDocument pdfDocument = new PdfDocument(writer);
              Document document = new Document(pdfDocument)) {
@@ -71,7 +72,6 @@ public class PdfExportService {
             addStrengthSection(document, analysis);
             addSuggestionSection(document, analysis);
             addOriginalTextSection(document, analysis);
-            return outputStream.toByteArray();
         } catch (IOException e) {
             log.error(
                     "导出简历分析PDF失败: method=exportResumeAnalysis, resumeId={}, filename={}",
@@ -81,6 +81,7 @@ public class PdfExportService {
             );
             throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出简历分析PDF失败", e);
         }
+        return outputStream.toByteArray();
     }
 
     /**
@@ -88,7 +89,8 @@ public class PdfExportService {
      */
     public byte[] exportInterviewReport(InterviewSessionEntity session) {
         validateInterviewSession(session);
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (outputStream;
              PdfWriter writer = new PdfWriter(outputStream);
              PdfDocument pdfDocument = new PdfDocument(writer);
              Document document = new Document(pdfDocument)) {
@@ -100,13 +102,13 @@ public class PdfExportService {
             addInterviewStrengths(document, session);
             addInterviewImprovements(document, session);
             addInterviewAnswers(document, session);
-            return outputStream.toByteArray();
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.error("导出面试报告PDF失败: sessionId={}", session.getSessionId(), e);
             throw new BusinessException(ErrorCode.EXPORT_PDF_FAILED, "导出面试报告PDF失败", e);
         }
+        return outputStream.toByteArray();
     }
 
     private void validateExportParams(ResumeEntity resume, ResumeAnalysisResponse analysis) {
