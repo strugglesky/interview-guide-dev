@@ -198,7 +198,12 @@ public class LlmProviderRegistry {
      * 这里统一设置超时时间、模型名、温度和重试能力。
      */
     private OpenAiChatModel buildChatModel(String providerId) {
-        LlmProviderProperties.ProviderConfig config = properties.getProviders().get(providerId);
+        Map<String, ProviderConfig> providers = properties.getProviders();
+        if (providers == null || providers.isEmpty()) {
+            log.error("[LlmProviderRegistry] No provider configs bound under app.ai.providers");
+            throw new IllegalStateException("No LLM provider configuration found");
+        }
+        LlmProviderProperties.ProviderConfig config = providers.get(providerId);
         if (config == null) {
             log.error("[LlmProviderRegistry] Provider config not found: {}", providerId);
             throw new IllegalArgumentException("Unknown LLM provider: " + providerId);

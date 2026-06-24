@@ -54,7 +54,7 @@ public class InterviewSkillService {
      */
     private static final Pattern FRONT_MATTER_PATTERN = Pattern.compile("(?s)^---\\s*\\n(.*?)\\n---\\s*\\n?(.*)$");
     /** 从 classpath skill 路径中提取 skillId。 */
-    private static final Pattern SKILL_ID_PATTERN = Pattern.compile(".*/skills/([^/]+)/SKILL\\.md$");
+    private static final Pattern SKILL_ID_PATTERN = Pattern.compile(".*(?:^|/)skills/([^/]+)/SKILL\\.md(?:$|[)\\]]).*");
     /** Skill 分类配置文件名。 */
     private static final String SKILL_META_FILE = "skill.meta.yml";
     /** JD 解析使用的系统提示词模板路径。 */
@@ -821,7 +821,10 @@ public class InterviewSkillService {
     }
 
     private String extractSkillId(Resource resource) {
-        String description = String.valueOf(resource);
+        String description = resource.getDescription();
+        if (!StringUtils.hasText(description)) {
+            description = String.valueOf(resource);
+        }
         Matcher matcher = SKILL_ID_PATTERN.matcher(description.replace('\\', '/'));
         return matcher.find() ? matcher.group(1) : null;
     }

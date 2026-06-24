@@ -422,15 +422,17 @@ public class InterviewSessionService {
                 || cachedSession.getStatus() == InterviewSessionDTO.SessionStatus.EVALUATED) {
             throw new BusinessException(ErrorCode.INTERVIEW_ALREADY_COMPLETED, "面试已完成，不能继续作答");
         }
-        if (questionIndex == null || questionIndex != cachedSession.getCurrentIndex()) {
+        List<InterviewQuestionDTO> questions = cachedSession.getQuestions(objectMapper);
+        int currentIndex = cachedSession.getCurrentIndex();
+        if (currentIndex < 0 || currentIndex >= questions.size()) {
+            throw new BusinessException(ErrorCode.INTERVIEW_ALREADY_COMPLETED, "所有问题已回答完毕");
+        }
+        int currentQuestionIndex = questions.get(currentIndex).questionIndex();
+        if (questionIndex == null || questionIndex != currentQuestionIndex) {
             throw new BusinessException(
                     ErrorCode.BAD_REQUEST,
-                    "问题索引不匹配，当前应答索引为: " + cachedSession.getCurrentIndex()
+                    "问题索引不匹配，当前问题索引为: " + currentQuestionIndex
             );
-        }
-        List<InterviewQuestionDTO> questions = cachedSession.getQuestions(objectMapper);
-        if (cachedSession.getCurrentIndex() < 0 || cachedSession.getCurrentIndex() >= questions.size()) {
-            throw new BusinessException(ErrorCode.INTERVIEW_ALREADY_COMPLETED, "所有问题已回答完毕");
         }
     }
 

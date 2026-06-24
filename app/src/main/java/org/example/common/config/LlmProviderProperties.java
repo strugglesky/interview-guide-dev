@@ -12,6 +12,7 @@ import java.util.Map;
  */
 @Component
 @Data
+@ConfigurationProperties(prefix = "app.ai")
 public class LlmProviderProperties {
     private String defaultProvider = "dashscope";
     private Map<String, ProviderConfig> providers;
