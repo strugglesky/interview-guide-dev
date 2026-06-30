@@ -21,6 +21,8 @@ import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
@@ -313,10 +315,7 @@ public class VoiceInterviewService {
     public void updateEvaluateStatus(Long sessionId, AsyncTaskStatus status, String error) {
         try {
             sessionRepository.findById(sessionId).ifPresent(session -> {
-                session.setEvaluateStatus(status);
-                session.setEvaluateError(error);
-                sessionRepository.save(session);
-                log.debug("Evaluation status updated: sessionId={}, status={}", sessionId, status);
+                saveEvaluateStatus(session, status, error);
             });
         } catch (Exception e) {
             log.error("Failed to update evaluation status: sessionId={}, status={}, error={}",
@@ -327,9 +326,12 @@ public class VoiceInterviewService {
     /**
      * 触发会话的异步评估（由控制器调用）
      */
-    @Transactional
     public void triggerEvaluation(Long sessionId) {
-        updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
+        VoiceInterviewSessionEntity session = loadSessionOrThrow(sessionId);
+        if (!shouldTriggerEvaluation(session.getEvaluateStatus())) {
+            return;
+        }
+        saveEvaluateStatus(session, AsyncTaskStatus.PENDING, null);
         voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
     }
 
@@ -386,14 +388,56 @@ public class VoiceInterviewService {
 
     private void completeSession(VoiceInterviewSessionEntity session) {
         LocalDateTime endTime = LocalDateTime.now();
+        boolean shouldScheduleEvaluation = shouldTriggerEvaluation(session.getEvaluateStatus());
         session.setStatus(VoiceInterviewSessionStatus.COMPLETED);
         session.setCurrentPhase(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED);
         session.setEndTime(endTime);
         session.setActualDuration(resolveActualDurationMinutes(session.getStartTime(), endTime));
+        if (shouldScheduleEvaluation) {
+            session.setEvaluateStatus(AsyncTaskStatus.PENDING);
+            session.setEvaluateError(null);
+        }
         sessionRepository.save(session);
         cacheSession(session);
         log.info("Voice interview session ended: sessionId={}, actualDuration={}",
                 session.getId(), session.getActualDuration());
+        if (shouldScheduleEvaluation) {
+            scheduleEvaluationAfterCommit(session.getId());
+        }
+    }
+
+    private void saveEvaluateStatus(VoiceInterviewSessionEntity session, AsyncTaskStatus status, String error) {
+        session.setEvaluateStatus(status);
+        session.setEvaluateError(error);
+        sessionRepository.save(session);
+        cacheSession(session);
+        log.debug("Evaluation status updated: sessionId={}, status={}", session.getId(), status);
+    }
+
+    private boolean shouldTriggerEvaluation(AsyncTaskStatus status) {
+        return status == null || status == AsyncTaskStatus.FAILED;
+    }
+
+    private void scheduleEvaluationAfterCommit(Long sessionId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            sendEvaluationTask(sessionId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                sendEvaluationTask(sessionId);
+            }
+        });
+    }
+
+    private void sendEvaluationTask(Long sessionId) {
+        try {
+            voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
+        } catch (Exception e) {
+            log.error("Send voice interview evaluation task failed: sessionId={}", sessionId, e);
+            updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, e.getMessage());
+        }
     }
 
     private List<VoiceInterviewMessageEntity> buildMessagesToSave(

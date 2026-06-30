@@ -189,6 +189,45 @@ public class QwenAsrService {
     }
 
     /**
+     * 停止旧连接并重新建立（用于 ASR WebSocket 被服务端关闭后恢复识别）。
+     */
+    public void restartTranscription(
+            String sessionId,
+            Consumer<String> onFinal,
+            Consumer<String> onPartial,
+            Consumer<Throwable> onError) {
+        synchronized (lockForSession(sessionId)) {
+            log.info("[Session: {}] Restarting DashScope ASR (stop + start)", sessionId);
+            stopTranscription(sessionId);
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            startTranscriptionLocked(sessionId, onFinal, onPartial, onError);
+
+            // Verify reconnection succeeded
+            for (int attempt = 0; attempt < 10; attempt++) {
+                try {
+                    Thread.sleep(100);
+                    AsrSession newSession = sessions.get(sessionId);
+                    if (newSession != null && newSession.getConversation() != null) {
+                        log.info("[Session: {}] ASR reconnection verified successfully", sessionId);
+                        return;
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("[Session: {}] ASR reconnection verification interrupted", sessionId);
+                    return;
+                }
+            }
+
+            log.warn("[Session: {}] ASR reconnection may not be fully ready after 1 second", sessionId);
+        }
+    }
+
+
+    /**
      * 将音频数据发送到 ASR 服务以进行转录。
      *
      * 音频数据应为 PCM 格式，采样率为 16kHz。

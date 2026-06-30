@@ -7,12 +7,7 @@ import org.example.common.exception.BusinessException;
 import org.example.common.model.AsyncTaskStatus;
 import org.example.common.model.ErrorCode;
 import org.example.common.result.Result;
-import org.example.modules.voiceinterview.dto.CreateSessionRequest;
-import org.example.modules.voiceinterview.dto.SessionMetaDTO;
-import org.example.modules.voiceinterview.dto.SessionResponseDTO;
-import org.example.modules.voiceinterview.dto.VoiceEvaluationStatusDTO;
-import org.example.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
-import org.example.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
+import org.example.modules.voiceinterview.dto.*;
 import org.example.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import org.example.modules.voiceinterview.service.VoiceInterviewEvaluationService;
 import org.example.modules.voiceinterview.service.VoiceInterviewService;
@@ -45,16 +40,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class VoiceInterviewController {
+
     private final VoiceInterviewService voiceInterviewService;
     private final VoiceInterviewEvaluationService evaluationService;
-    private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
-
     /**
-     * 创建新的语音访谈会话
+     * Create a new voice interview session
      */
     @PostMapping("/sessions")
     public Result<SessionResponseDTO> createSession(@Valid @RequestBody CreateSessionRequest request) {
-        return Result.success(voiceInterviewService.createSession(request));
+        log.info("Creating voice interview session for role: {}", request.getRoleType());
+        SessionResponseDTO session = voiceInterviewService.createSession(request);
+        return Result.success(session);
     }
 
     /**
@@ -62,9 +58,10 @@ public class VoiceInterviewController {
      */
     @GetMapping("/sessions/{sessionId}")
     public Result<SessionResponseDTO> getSession(@PathVariable Long sessionId) {
+        log.info("Getting session details for: {}", sessionId);
         SessionResponseDTO session = voiceInterviewService.getSessionDTO(sessionId);
         if (session == null) {
-            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "语音面试会话不存在: " + sessionId);
+            return Result.error("Session not found: " + sessionId);
         }
         return Result.success(session);
     }
@@ -77,8 +74,8 @@ public class VoiceInterviewController {
      */
     @PostMapping("/sessions/{sessionId}/end")
     public Result<Void> endSession(@PathVariable Long sessionId) {
-        voiceInterviewService.endSession(String.valueOf(sessionId));
-        triggerEvaluationIfNeeded(sessionId);
+        log.info("Ending session: {}", sessionId);
+        voiceInterviewService.endSession(sessionId.toString());
         return Result.success();
     }
 
@@ -86,9 +83,13 @@ public class VoiceInterviewController {
      * Pause interview session
      */
     @PutMapping("/sessions/{sessionId}/pause")
-    public Result<Void> pauseSession(@PathVariable Long sessionId,
-                                     @RequestBody Map<String, String> request) {
-        voiceInterviewService.pauseSession(String.valueOf(sessionId), resolvePauseReason(request));
+    public Result<Void> pauseSession(
+            @PathVariable Long sessionId,
+            @RequestBody Map<String, String> request
+    ) {
+        log.info("Pausing session: {}", sessionId);
+        String reason = request.getOrDefault("reason", "user_initiated");
+        voiceInterviewService.pauseSession(sessionId.toString(), reason);
         return Result.success();
     }
 
@@ -97,7 +98,9 @@ public class VoiceInterviewController {
      */
     @PutMapping("/sessions/{sessionId}/resume")
     public Result<SessionResponseDTO> resumeSession(@PathVariable Long sessionId) {
-        return Result.success(voiceInterviewService.resumeSession(String.valueOf(sessionId)));
+        log.info("Resuming session: {}", sessionId);
+        SessionResponseDTO session = voiceInterviewService.resumeSession(sessionId.toString());
+        return Result.success(session);
     }
 
     /**
@@ -108,7 +111,9 @@ public class VoiceInterviewController {
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String status
     ) {
-        return Result.success(voiceInterviewService.getAllSessions(userId, status));
+        log.info("Getting sessions for user: {}, status: {}", userId, status);
+        List<SessionMetaDTO> sessions = voiceInterviewService.getAllSessions(userId, status);
+        return Result.success(sessions);
     }
 
     /**
@@ -116,6 +121,7 @@ public class VoiceInterviewController {
      */
     @DeleteMapping("/sessions/{sessionId}")
     public Result<Void> deleteSession(@PathVariable Long sessionId) {
+        log.info("Deleting voice interview session: {}", sessionId);
         voiceInterviewService.deleteSession(sessionId);
         return Result.success();
     }
@@ -125,25 +131,40 @@ public class VoiceInterviewController {
      */
     @GetMapping("/sessions/{sessionId}/messages")
     public Result<List<VoiceInterviewMessageDTO>> getMessages(@PathVariable Long sessionId) {
-        return Result.success(voiceInterviewService.getConversationHistoryDTO(String.valueOf(sessionId)));
+        log.info("Getting messages for session: {}", sessionId);
+        List<VoiceInterviewMessageDTO> messages =
+                voiceInterviewService.getConversationHistoryDTO(sessionId.toString());
+        return Result.success(messages);
     }
 
     /**
-     * 获取会话的评估状态和结果
+     * Get evaluation status and result for a session
      * <p>
-     * 返回当前评估状态（PENDING/PROCESSING/COMPLETED/FAILED）
-     * 以及完成时的评估结果。
-     * 前台轮询此端点，直到评估完成。
+     * Returns the current evaluation status (PENDING/PROCESSING/COMPLETED/FAILED)
+     * along with the evaluation result when COMPLETED.
+     * Frontend polls this endpoint until evaluation is complete.
      * </p>
      */
     @GetMapping("/sessions/{sessionId}/evaluation")
     public Result<VoiceEvaluationStatusDTO> getEvaluation(@PathVariable Long sessionId) {
-        VoiceInterviewSessionEntity session = loadSessionOrThrow(sessionId);
-        VoiceEvaluationStatusDTO status = loadCurrentEvaluationStatus(sessionId, session);
-        if (status == null) {
-            throw new BusinessException(ErrorCode.VOICE_EVALUATION_NOT_FOUND, "语音面试评估尚未开始");
+        log.info("Getting evaluation status for session: {}", sessionId);
+
+        VoiceInterviewSessionEntity session = voiceInterviewService.getSession(sessionId);
+        if (session == null) {
+            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在: " + sessionId);
         }
-        return Result.success(status);
+
+        AsyncTaskStatus status = session.getEvaluateStatus();
+        VoiceEvaluationStatusDTO.VoiceEvaluationStatusDTOBuilder builder = VoiceEvaluationStatusDTO.builder()
+                .evaluateStatus(status != null ? status.name() : null)
+                .evaluateError(session.getEvaluateError());
+
+        if (status == AsyncTaskStatus.COMPLETED) {
+            VoiceEvaluationDetailDTO evaluation = evaluationService.getEvaluation(sessionId);
+            builder.evaluation(evaluation);
+        }
+
+        return Result.success(builder.build());
     }
 
     /**
@@ -156,82 +177,35 @@ public class VoiceInterviewController {
      */
     @PostMapping("/sessions/{sessionId}/evaluation")
     public Result<VoiceEvaluationStatusDTO> generateEvaluation(@PathVariable Long sessionId) {
-        VoiceInterviewSessionEntity session = loadSessionOrThrow(sessionId);
-        VoiceEvaluationStatusDTO currentStatus = loadCurrentEvaluationStatus(sessionId, session);
-        if (shouldReuseCurrentStatus(currentStatus)) {
-            return Result.success(currentStatus);
-        }
-        enqueueEvaluationTask(sessionId);
-        return Result.success(buildProgressStatus(AsyncTaskStatus.PENDING, null));
-    }
+        log.info("Triggering async evaluation for session: {}", sessionId);
 
-    private VoiceInterviewSessionEntity loadSessionOrThrow(Long sessionId) {
         VoiceInterviewSessionEntity session = voiceInterviewService.getSession(sessionId);
         if (session == null) {
-            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "语音面试会话不存在: " + sessionId);
+            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在: " + sessionId);
         }
-        return session;
-    }
 
-    private void triggerEvaluationIfNeeded(Long sessionId) {
-        VoiceInterviewSessionEntity session = loadSessionOrThrow(sessionId);
-        VoiceEvaluationStatusDTO currentStatus = loadCurrentEvaluationStatus(sessionId, session);
-        if (shouldReuseCurrentStatus(currentStatus)) {
-            return;
-        }
-        enqueueEvaluationTask(sessionId);
-    }
-
-    private void enqueueEvaluationTask(Long sessionId) {
-        voiceInterviewService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
-        voiceEvaluateStreamProducer.sendEvaluateTask(String.valueOf(sessionId));
-    }
-
-    private VoiceEvaluationStatusDTO loadCurrentEvaluationStatus(Long sessionId,
-                                                                 VoiceInterviewSessionEntity session) {
-        if (session.getEvaluateStatus() == null) {
-            return null;
-        }
-        if (AsyncTaskStatus.COMPLETED.equals(session.getEvaluateStatus())) {
-            return loadCompletedEvaluationStatus(sessionId);
-        }
-        return buildProgressStatus(session.getEvaluateStatus(), session.getEvaluateError());
-    }
-
-    private VoiceEvaluationStatusDTO loadCompletedEvaluationStatus(Long sessionId) {
-        try {
-            return VoiceEvaluationStatusDTO.builder()
+        // If already completed, return cached result
+        if (session.getEvaluateStatus() == AsyncTaskStatus.COMPLETED) {
+            VoiceEvaluationDetailDTO evaluation = evaluationService.getEvaluation(sessionId);
+            return Result.success(VoiceEvaluationStatusDTO.builder()
                     .evaluateStatus(AsyncTaskStatus.COMPLETED.name())
-                    .evaluation(evaluationService.getEvaluation(sessionId))
-                    .build();
-        } catch (BusinessException e) {
-            if (!ErrorCode.VOICE_EVALUATION_NOT_FOUND.getCode().equals(e.getCode())) {
-                throw e;
-            }
-            log.error("Voice interview evaluation result missing: sessionId={}", sessionId, e);
-            return buildProgressStatus(AsyncTaskStatus.FAILED, "评估结果缺失，请重试生成");
+                    .evaluation(evaluation)
+                    .build());
         }
-    }
 
-    private VoiceEvaluationStatusDTO buildProgressStatus(AsyncTaskStatus status, String error) {
-        return VoiceEvaluationStatusDTO.builder()
-                .evaluateStatus(status.name())
-                .evaluateError(error)
-                .build();
-    }
-
-    private boolean shouldReuseCurrentStatus(VoiceEvaluationStatusDTO currentStatus) {
-        if (currentStatus == null || !StringUtils.hasText(currentStatus.getEvaluateStatus())) {
-            return false;
+        // If already in progress, return current status
+        if (session.getEvaluateStatus() == AsyncTaskStatus.PENDING
+                || session.getEvaluateStatus() == AsyncTaskStatus.PROCESSING) {
+            return Result.success(VoiceEvaluationStatusDTO.builder()
+                    .evaluateStatus(session.getEvaluateStatus().name())
+                    .build());
         }
-        return !AsyncTaskStatus.FAILED.name().equals(currentStatus.getEvaluateStatus());
-    }
 
-    private String resolvePauseReason(Map<String, String> request) {
-        if (request == null) {
-            return "user_initiated";
-        }
-        String reason = request.get("reason");
-        return StringUtils.hasText(reason) ? reason.strip() : "user_initiated";
+        // Trigger new async evaluation via service
+        voiceInterviewService.triggerEvaluation(sessionId);
+
+        return Result.success(VoiceEvaluationStatusDTO.builder()
+                .evaluateStatus(AsyncTaskStatus.PENDING.name())
+                .build());
     }
 }
