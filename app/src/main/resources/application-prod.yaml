@@ -1,0 +1,12 @@
+logging:
+  file:
+    name: ${APP_LOG_FILE:/data/logs/ai-interview-platform/app.log}
+  level:
+    root: INFO
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${APP_LOG_FILE_PATTERN:/data/logs/ai-interview-platform/app.%d{yyyy-MM-dd}.%i.log.gz}
+      max-file-size: ${APP_LOG_MAX_FILE_SIZE:20MB}
+      max-history: ${APP_LOG_MAX_HISTORY:14}
+      total-size-cap: ${APP_LOG_TOTAL_SIZE_CAP:1GB}
+      clean-history-on-start: false
